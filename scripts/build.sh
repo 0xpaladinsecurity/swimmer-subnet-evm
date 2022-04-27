@@ -39,16 +39,15 @@ source "$SUBNET_EVM_PATH"/scripts/constants.sh
 if [[ $# -eq 1 ]]; then
     binary_path=$1
 else
-    echo "Invalid arguments to build subnet-evm. Requires one arguments to specify binary location."
-    exit 1
+    # Default to Swimmer VMID if no arg is provided
+    binary_path="srSGD5JeYhL8GLx4RUw53VN5TcoBbax6EeCYmy5S3DiteJhdF"
 fi
 
 # Check if SUBNET_EVM_COMMIT is set, if not retrieve the last commit from the repo.
 # This is used in the Dockerfile to allow a commit hash to be passed in without
 # including the .git/ directory within the Docker image.
 subnet_evm_commit=${SUBNET_EVM_COMMIT:-$( git rev-list -1 HEAD )}
-swimmer_id=srSGD5JeYhL8GLx4RUw53VN5TcoBbax6EeCYmy5S3DiteJhdF
 
 # Build Subnet EVM, which is run as a subprocess
 echo "Building Subnet EVM Version: $subnet_evm_version $swimmer_version; GitCommit: $subnet_evm_commit"
-go build -ldflags "-X github.com/ava-labs/subnet-evm/plugin/evm.GitCommit=$subnet_evm_commit -X github.com/ava-labs/subnet-evm/plugin/evm.Version=$subnet_evm_version-$swimmer_version $static_ld_flags" -o "$binary_path/$swimmer_id" "plugin/"*.go
+go build -ldflags "-X github.com/ava-labs/subnet-evm/plugin/evm.GitCommit=$subnet_evm_commit -X github.com/ava-labs/subnet-evm/plugin/evm.Version=$subnet_evm_version-$swimmer_version $static_ld_flags" -o "$binary_path" "plugin/"*.go
