@@ -40,8 +40,7 @@ import (
 	"github.com/ava-labs/subnet-evm/core/state"
 	"github.com/ava-labs/subnet-evm/core/types"
 	"github.com/ava-labs/subnet-evm/params"
-	"github.com/ava-labs/subnet-evm/predeploy"
-
+	"github.com/ava-labs/subnet-evm/precompile"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/prque"
 	"github.com/ethereum/go-ethereum/event"
@@ -482,18 +481,7 @@ func (pool *TxPool) GasPrice() *big.Int {
 	pool.mu.RLock()
 	defer pool.mu.RUnlock()
 
-	if pool.chainconfig.IsSwimmerPhase0(new(big.Int).SetUint64(pool.currentHead.Time)) {
-		return pool.getFixedGasPrice()
-	}
 	return new(big.Int).Set(pool.gasPrice)
-}
-
-func (pool *TxPool) getFixedGasPrice() *big.Int {
-	pool.currentStateLock.Lock()
-	defer pool.currentStateLock.Unlock()
-
-	preContract := &predeploy.PredeployContract{}
-	return preContract.GetGasPrice(pool.currentState)
 }
 
 // SetGasPrice updates the minimum price required by the transaction pool for a
@@ -727,38 +715,36 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	if err != nil {
 		return ErrInvalidSender
 	}
-
-	if !pool.chainconfig.IsSwimmerPhase0(new(big.Int).SetUint64(pool.currentHead.Time)) {
-		// Drop non-local transactions under our own minimal accepted gas price or tip
-		if !local && tx.GasTipCapIntCmp(pool.gasPrice) < 0 {
-			return fmt.Errorf("%w: address %s have gas tip cap (%d) < pool gas tip cap (%d)", ErrUnderpriced, from.Hex(), tx.GasTipCap(), pool.gasPrice)
-		}
-		// Drop the transaction if the gas fee cap is below the pool's minimum fee
-		if pool.minimumFee != nil && tx.GasFeeCapIntCmp(pool.minimumFee) < 0 {
-			return fmt.Errorf("%w: address %s have gas fee cap (%d) < pool minimum fee cap (%d)", ErrUnderpriced, from.Hex(), tx.GasFeeCap(), pool.minimumFee)
-		}
+	// Drop non-local transactions under our own minimal accepted gas price or tip
+	if !local && tx.GasTipCapIntCmp(pool.gasPrice) < 0 {
+		return fmt.Errorf("%w: address %s have gas tip cap (%d) < pool gas tip cap (%d)", ErrUnderpriced, from.Hex(), tx.GasTipCap(), pool.gasPrice)
 	}
-
+	// Drop the transaction if the gas fee cap is below the pool's minimum fee
+	if pool.minimumFee != nil && tx.GasFeeCapIntCmp(pool.minimumFee) < 0 {
+		return fmt.Errorf("%w: address %s have gas fee cap (%d) < pool minimum fee cap (%d)", ErrUnderpriced, from.Hex(), tx.GasFeeCap(), pool.minimumFee)
+	}
 	// Ensure the transaction adheres to nonce ordering
 	if err := pool.CheckNonceOrdering(from, tx.Nonce()); err != nil {
 		return err
 	}
+
+	isTxAllowList := pool.chainconfig.IsTxAllowList(pool.currentHead.Number)
 	// Transactor should have enough funds to cover the costs
 	// cost == V + GP * GL
 	pool.currentStateLock.Lock()
-	if pool.chainconfig.IsSwimmerPhase0(new(big.Int).SetUint64(pool.currentHead.Time)) {
-		if err := pool.validateSwimmerRule(from, tx); err != nil {
+	if balance, cost := pool.currentState.GetBalance(from), tx.Cost(); balance.Cmp(cost) < 0 {
+		pool.currentStateLock.Unlock()
+		return fmt.Errorf("%w: address %s have (%d) want (%d)", ErrInsufficientFunds, from.Hex(), balance, cost)
+	}
+	// If the tx allow list is enabled, return an error if the from address is not allow listed.
+	if isTxAllowList {
+		txAllowListRole := precompile.GetTxAllowListStatus(pool.currentState, from)
+		if !txAllowListRole.IsEnabled() {
 			pool.currentStateLock.Unlock()
-			return err
-		}
-	} else {
-		if balance, cost := pool.currentState.GetBalance(from), tx.Cost(); balance.Cmp(cost) < 0 {
-			pool.currentStateLock.Unlock()
-			return fmt.Errorf("%w: address %s have (%d) want (%d)", ErrInsufficientFunds, from.Hex(), balance, cost)
+			return fmt.Errorf("%w: %s", precompile.ErrSenderAddressNotAllowListed, from)
 		}
 	}
 	pool.currentStateLock.Unlock()
-
 	// Ensure the transaction has more gas than the basic tx fee.
 	intrGas, err := IntrinsicGas(tx.Data(), tx.AccessList(), tx.To() == nil, true, pool.istanbul)
 	if err != nil {
@@ -766,42 +752,6 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	}
 	if txGas := tx.Gas(); txGas < intrGas {
 		return fmt.Errorf("%w: address %v tx gas (%v) < intrinsic gas (%v)", ErrIntrinsicGas, from.Hex(), tx.Gas(), intrGas)
-	}
-	return nil
-}
-
-// <<Swimmer VM>>
-func (pool *TxPool) validateSwimmerRule(from common.Address, tx *types.Transaction) error {
-	state := pool.currentState
-	preContract := &predeploy.PredeployContract{}
-	// Verify blocked account
-	if blockedTime := preContract.GetBlockedTimeOf(state, from); blockedTime > uint64(time.Now().Unix()) {
-		return fmt.Errorf("%w: address %s blocked until %s", ErrAccountBlocked, from.Hex(), time.Unix(int64(blockedTime), 0))
-	}
-	// Verify gas price
-	fixedGasPrice := preContract.GetGasPrice(state)
-	contractCreation := tx.To() == nil
-	if !contractCreation && tx.GasFeeCapIntCmp(new(big.Int).SetUint64(0)) == 0 {
-		to := *tx.To()
-		isWhitelistedUser := preContract.IsWhitelistedUser(state, to, from)
-		isWhitelistedFunc := preContract.IsWhitelistedFunc(state, to, tx.Data()[:4])
-		log.Info("validateSwimmerRule", "isWhitelistedUser", isWhitelistedUser, "isWhitelistedFunc", isWhitelistedFunc)
-		log.Info("validateSwimmerRule 2", "to", to, "from", from, "data", tx.Data()[:4])
-		if !isWhitelistedUser || !isWhitelistedFunc {
-			return fmt.Errorf("%w: from address %s have gas fee cap (0); to address %s don't accept pay fee", ErrUnderpriced, from.Hex(), to.Hex())
-		}
-		if balance, cost := pool.currentState.GetBalance(to), tx.CostWithoutValue(fixedGasPrice); balance.Cmp(cost) < 0 {
-			return fmt.Errorf("%w: to address %s have (%d) want (%d) with gas price (%d)", ErrToInsufficientFunds, to.Hex(), balance, cost, fixedGasPrice)
-		}
-	} else {
-		if tx.GasFeeCapIntCmp(fixedGasPrice) != 0 {
-			return fmt.Errorf("%w: from address %s have (%d) diffrent from fixed fee (%d)", ErrUnderpriced, from.Hex(), tx.GasFeeCap(), fixedGasPrice)
-		}
-	}
-	// Transactor should have enough funds to cover the costs
-	// cost == V + GP * GL
-	if balance, cost := pool.currentState.GetBalance(from), tx.Cost(); balance.Cmp(cost) < 0 {
-		return fmt.Errorf("%w: address %s have (%d) want (%d)", ErrInsufficientFunds, from.Hex(), balance, cost)
 	}
 	return nil
 }
@@ -1346,12 +1296,9 @@ func (pool *TxPool) runReorg(done chan struct{}, reset *txpoolResetRequest, dirt
 	if reset != nil {
 		pool.demoteUnexecutables()
 		if reset.newHead != nil && pool.chainconfig.IsSubnetEVM(new(big.Int).SetUint64(reset.newHead.Time)) {
-			// <<Swimmer VM>> Disable EIP-1559
-			if !pool.chainconfig.IsSwimmerPhase0(new(big.Int).SetUint64(reset.newHead.Time)) {
-				_, baseFeeEstimate, err := dummy.EstimateNextBaseFee(pool.chainconfig, reset.newHead, uint64(time.Now().Unix()))
-				if err == nil {
-					pool.priced.SetBaseFee(baseFeeEstimate)
-				}
+			_, baseFeeEstimate, err := dummy.EstimateNextBaseFee(pool.chainconfig, reset.newHead, uint64(time.Now().Unix()))
+			if err == nil {
+				pool.priced.SetBaseFee(baseFeeEstimate)
 			}
 		}
 
@@ -1486,10 +1433,6 @@ func (pool *TxPool) reset(oldHead, newHead *types.Header) {
 	isSubnetEVM := pool.chainconfig.IsSubnetEVM(new(big.Int).SetUint64(newHead.Time))
 	pool.eip2718 = isSubnetEVM
 	pool.eip1559 = isSubnetEVM
-
-	// <<Swimmer VM>> Disable EIP-1559
-	isSwimmerPhase0 := pool.chainconfig.IsSwimmerPhase0(new(big.Int).SetUint64(newHead.Time))
-	pool.eip1559 = !isSwimmerPhase0
 }
 
 // promoteExecutables moves transactions that have become processable from the
@@ -1756,11 +1699,6 @@ func (pool *TxPool) demoteUnexecutables() {
 }
 
 func (pool *TxPool) startPeriodicFeeUpdate() {
-	// <<Swimmer VM>> Disable EIP-1559
-	if pool.chainconfig.SwimmerPhase0Timestamp.Cmp(new(big.Int).SetInt64(time.Now().Unix())) == -1 {
-		return
-	}
-
 	if pool.chainconfig.SubnetEVMTimestamp == nil {
 		return
 	}

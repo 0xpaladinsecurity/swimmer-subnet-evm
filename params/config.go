@@ -63,40 +63,29 @@ var (
 		MaxBlockGasCost:  big.NewInt(1_000_000),
 		BlockGasCostStep: big.NewInt(200_000),
 	}
-
-	DefaultSwimmerConfig = &SwimmerConfig{
-		GasLimit:          big.NewInt(20_000_000),
-		GasPrice:          big.NewInt(25_000_000_000),
-		ProxyAdmin:        common.HexToAddress("0x8db97C7cEcE249c2b98bDC0226Cc4C2A57BF52FC"),
-		PoolReward:        common.HexToAddress("0x8db97C7cEcE249c2b98bDC0226Cc4C2A57BF52FC"),
-		InitNativeAccount: common.HexToAddress("0x8db97C7cEcE249c2b98bDC0226Cc4C2A57BF52FC"),
-		InitNativeAmount:  new(big.Int).SetBytes(common.Hex2Bytes("0x52B7D2DCC80CD2E4000000")),
-	}
 )
 
 var (
 	// AvalancheMainnetChainConfig is the configuration for Avalanche Main Network
 	SubnetEVMDefaultChainConfig = &ChainConfig{
-		ChainID:                SubnetEVMChainID,
-		HomesteadBlock:         big.NewInt(0),
-		EIP150Block:            big.NewInt(0),
-		EIP150Hash:             common.HexToHash("0x2086799aeebeae135c246c65021c82b4e15a2c451340993aacfd2751886514f0"),
-		EIP155Block:            big.NewInt(0),
-		EIP158Block:            big.NewInt(0),
-		ByzantiumBlock:         big.NewInt(0),
-		ConstantinopleBlock:    big.NewInt(0),
-		PetersburgBlock:        big.NewInt(0),
-		IstanbulBlock:          big.NewInt(0),
-		MuirGlacierBlock:       big.NewInt(0),
-		SubnetEVMTimestamp:     big.NewInt(0),
-		SwimmerPhase0Timestamp: big.NewInt(0),
-		FeeConfig:              DefaultFeeConfig,
-		AllowFeeRecipients:     false,
-		SwimmerConfig:          DefaultSwimmerConfig,
+		ChainID:             SubnetEVMChainID,
+		HomesteadBlock:      big.NewInt(0),
+		EIP150Block:         big.NewInt(0),
+		EIP150Hash:          common.HexToHash("0x2086799aeebeae135c246c65021c82b4e15a2c451340993aacfd2751886514f0"),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		SubnetEVMTimestamp:  big.NewInt(0),
+		FeeConfig:           DefaultFeeConfig,
+		AllowFeeRecipients:  false,
 	}
 
-	TestChainConfig        = &ChainConfig{big.NewInt(1), big.NewInt(0), big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), DefaultFeeConfig, false, precompile.ContractDeployerAllowListConfig{}, precompile.ContractNativeMinterConfig{}, DefaultSwimmerConfig}
-	TestPreSubnetEVMConfig = &ChainConfig{big.NewInt(1), big.NewInt(0), big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, DefaultFeeConfig, false, precompile.ContractDeployerAllowListConfig{}, precompile.ContractNativeMinterConfig{}, DefaultSwimmerConfig}
+	TestChainConfig        = &ChainConfig{big.NewInt(1), big.NewInt(0), big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), DefaultFeeConfig, false, precompile.ContractDeployerAllowListConfig{}, precompile.ContractNativeMinterConfig{}, precompile.TxAllowListConfig{}}
+	TestPreSubnetEVMConfig = &ChainConfig{big.NewInt(1), big.NewInt(0), big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, DefaultFeeConfig, false, precompile.ContractDeployerAllowListConfig{}, precompile.ContractNativeMinterConfig{}, precompile.TxAllowListConfig{}}
 )
 
 // ChainConfig is the core config which determines the blockchain settings.
@@ -124,24 +113,12 @@ type ChainConfig struct {
 
 	SubnetEVMTimestamp *big.Int `json:"subnetEVMTimestamp,omitempty"` // A placeholder for the latest avalanche forks (nil = no fork, 0 = already activated)
 
-	SwimmerPhase0Timestamp *big.Int `json:"swimmerPhase0Timestamp,omitempty"`
-
 	FeeConfig          *FeeConfig `json:"feeConfig,omitempty"`
 	AllowFeeRecipients bool       `json:"allowFeeRecipients,omitempty"` // Allows fees to be collected by block builders.
 
-	ContractDeployerAllowListConfig precompile.ContractDeployerAllowListConfig `json:"contractDeployerAllowListConfig,omitempty"` // Config for the allow list precompile
+	ContractDeployerAllowListConfig precompile.ContractDeployerAllowListConfig `json:"contractDeployerAllowListConfig,omitempty"` // Config for the contract deployer allow list precompile
 	ContractNativeMinterConfig      precompile.ContractNativeMinterConfig      `json:"contractNativeMinterConfig,omitempty"`      // Config for the native minter precompile
-
-	SwimmerConfig *SwimmerConfig `json:"swimmerConfig,omitempty"`
-}
-
-type SwimmerConfig struct {
-	GasLimit          *big.Int       `json:"gasLimit"`
-	GasPrice          *big.Int       `json:"gasPrice"`
-	ProxyAdmin        common.Address `json:"proxyAdmin"`
-	PoolReward        common.Address `json:"poolReward"`
-	InitNativeAccount common.Address `json:"initNativeAccount"`
-	InitNativeAmount  *big.Int       `json:"initNativeAmount"`
+	TxAllowListConfig               precompile.TxAllowListConfig               `json:"txAllowListConfig,omitempty"`               // Config for the tx allow list precompile
 }
 
 type FeeConfig struct {
@@ -163,12 +140,7 @@ func (c *ChainConfig) String() string {
 	if err != nil {
 		feeBytes = []byte("cannot unmarshal FeeConfig")
 	}
-	swimmerBytes, err := json.Marshal(c.SwimmerConfig)
-	if err != nil {
-		swimmerBytes = []byte("cannot unmarshal SwimmerConfig")
-	}
-
-	return fmt.Sprintf("{ChainID: %v Homestead: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Muir Glacier: %v, Subnet EVM: %v, Swimmer Phase 0: %v, FeeConfig: %v, AllowFeeRecipients: %v, ContractDeployerAllowListConfig: %v, ContractNativeMinterConfig: %v, SwimmerConfig: %v, Engine: Dummy Consensus Engine}",
+	return fmt.Sprintf("{ChainID: %v Homestead: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Muir Glacier: %v, Subnet EVM: %v, FeeConfig: %v, AllowFeeRecipients: %v, ContractDeployerAllowListConfig: %v, ContractNativeMinterConfig: %v, TxAllowListConfig: %v, Engine: Dummy Consensus Engine}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.EIP150Block,
@@ -180,12 +152,11 @@ func (c *ChainConfig) String() string {
 		c.IstanbulBlock,
 		c.MuirGlacierBlock,
 		c.SubnetEVMTimestamp,
-		c.SwimmerPhase0Timestamp,
 		string(feeBytes),
 		c.AllowFeeRecipients,
 		c.ContractDeployerAllowListConfig,
 		c.ContractNativeMinterConfig,
-		string(swimmerBytes),
+		c.TxAllowListConfig,
 	)
 }
 
@@ -241,12 +212,7 @@ func (c *ChainConfig) IsSubnetEVM(blockTimestamp *big.Int) bool {
 	return utils.IsForked(c.SubnetEVMTimestamp, blockTimestamp)
 }
 
-// <<Swimmer VM>>
-func (c *ChainConfig) IsSwimmerPhase0(blockTimestamp *big.Int) bool {
-	return utils.IsForked(c.SwimmerPhase0Timestamp, blockTimestamp)
-}
-
-// IsContractDeployerAllowList returns whether [blockTimestamp] is either equal to the AllowList fork block timestamp or greater.
+// IsContractDeployerAllowList returns whether [blockTimestamp] is either equal to the ContractDeployerAllowList fork block timestamp or greater.
 func (c *ChainConfig) IsContractDeployerAllowList(blockTimestamp *big.Int) bool {
 	return utils.IsForked(c.ContractDeployerAllowListConfig.Timestamp(), blockTimestamp)
 }
@@ -254,6 +220,11 @@ func (c *ChainConfig) IsContractDeployerAllowList(blockTimestamp *big.Int) bool 
 // IsContractNativeMinter returns whether [blockTimestamp] is either equal to the NativeMinter fork block timestamp or greater.
 func (c *ChainConfig) IsContractNativeMinter(blockTimestamp *big.Int) bool {
 	return utils.IsForked(c.ContractNativeMinterConfig.Timestamp(), blockTimestamp)
+}
+
+// IsTxAllowList returns whether [blockTimestamp] is either equal to the TxAllowList fork block timestamp or greater.
+func (c *ChainConfig) IsTxAllowList(blockTimestamp *big.Int) bool {
+	return utils.IsForked(c.TxAllowListConfig.Timestamp(), blockTimestamp)
 }
 
 // GetFeeConfig returns the *FeeConfig if it exists, otherwise it returns [DefaultFeeConfig].
@@ -399,11 +370,6 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headHeight *big.Int, 
 		return newCompatError("SubnetEVM fork block timestamp", c.SubnetEVMTimestamp, newcfg.SubnetEVMTimestamp)
 	}
 
-	// <<Swimmer VM>>
-	if isForkIncompatible(c.SwimmerPhase0Timestamp, newcfg.SwimmerPhase0Timestamp, headTimestamp) {
-		return newCompatError("SwimmerPhase0 fork block timestamp", c.SwimmerPhase0Timestamp, newcfg.SwimmerPhase0Timestamp)
-	}
-
 	// Check that the configuration of the optional stateful precompiles is compatible.
 	if isForkIncompatible(c.ContractDeployerAllowListConfig.Timestamp(), newcfg.ContractDeployerAllowListConfig.Timestamp(), headTimestamp) {
 		return newCompatError("AllowList fork block timestamp", c.ContractDeployerAllowListConfig.Timestamp(), newcfg.ContractDeployerAllowListConfig.Timestamp())
@@ -412,6 +378,11 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headHeight *big.Int, 
 	// Check that the configuration of the optional stateful precompiles is compatible.
 	if isForkIncompatible(c.ContractNativeMinterConfig.Timestamp(), newcfg.ContractNativeMinterConfig.Timestamp(), headTimestamp) {
 		return newCompatError("ContractNativeMinter fork block timestamp", c.ContractNativeMinterConfig.Timestamp(), newcfg.ContractNativeMinterConfig.Timestamp())
+	}
+
+	// Check that the configuration of the optional stateful precompiles is compatible.
+	if isForkIncompatible(c.TxAllowListConfig.Timestamp(), newcfg.TxAllowListConfig.Timestamp(), headTimestamp) {
+		return newCompatError("AllowList fork block timestamp", c.TxAllowListConfig.Timestamp(), newcfg.TxAllowListConfig.Timestamp())
 	}
 
 	// TODO verify that the fee config is fully compatible between [c] and [newcfg].
@@ -476,15 +447,13 @@ type Rules struct {
 	IsHomestead, IsEIP150, IsEIP155, IsEIP158               bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 
-	// <<Swimmer VM>>
-	IsSwimmerPhase0 bool
-
 	// Rules for Avalanche releases
 	IsSubnetEVM bool
 
 	// Optional stateful precompile rules
 	IsContractDeployerAllowListEnabled bool
 	IsContractNativeMinterEnabled      bool
+	IsTxAllowListEnabled               bool
 
 	// Precompiles maps addresses to stateful precompiled contracts that are enabled
 	// for this rule set.
@@ -512,21 +481,15 @@ func (c *ChainConfig) rules(num *big.Int) Rules {
 	}
 }
 
-// <<Swimmer VM>>
-func (c *ChainConfig) swimmerRules(blockNum, blockTimestamp *big.Int) Rules {
-	rules := c.rules(blockNum)
-	rules.IsSwimmerPhase0 = c.IsSwimmerPhase0(blockTimestamp)
-	return rules
-}
-
 // AvalancheRules returns the Avalanche modified rules to support Avalanche
 // network upgrades
 func (c *ChainConfig) AvalancheRules(blockNum, blockTimestamp *big.Int) Rules {
-	rules := c.swimmerRules(blockNum, blockTimestamp)
+	rules := c.rules(blockNum)
 
 	rules.IsSubnetEVM = c.IsSubnetEVM(blockTimestamp)
 	rules.IsContractDeployerAllowListEnabled = c.IsContractDeployerAllowList(blockTimestamp)
 	rules.IsContractNativeMinterEnabled = c.IsContractNativeMinter(blockTimestamp)
+	rules.IsTxAllowListEnabled = c.IsTxAllowList(blockTimestamp)
 
 	// Initialize the stateful precompiles that should be enabled at [blockTimestamp].
 	rules.Precompiles = make(map[common.Address]precompile.StatefulPrecompiledContract)
@@ -550,6 +513,10 @@ func (c *ChainConfig) enabledStatefulPrecompiles() []precompile.StatefulPrecompi
 
 	if c.ContractNativeMinterConfig.Timestamp() != nil {
 		statefulPrecompileConfigs = append(statefulPrecompileConfigs, &c.ContractNativeMinterConfig)
+	}
+
+	if c.TxAllowListConfig.Timestamp() != nil {
+		statefulPrecompileConfigs = append(statefulPrecompileConfigs, &c.TxAllowListConfig)
 	}
 
 	return statefulPrecompileConfigs

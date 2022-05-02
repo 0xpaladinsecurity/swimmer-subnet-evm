@@ -30,14 +30,13 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"time"
 
 	"github.com/ethereum/go-ethereum/crypto"
 
 	"github.com/ava-labs/subnet-evm/core/types"
 	"github.com/ava-labs/subnet-evm/core/vm"
 	"github.com/ava-labs/subnet-evm/params"
-	"github.com/ava-labs/subnet-evm/predeploy"
+	"github.com/ava-labs/subnet-evm/precompile"
 	"github.com/ava-labs/subnet-evm/vmerrs"
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -203,78 +202,25 @@ func (st *StateTransition) to() common.Address {
 }
 
 func (st *StateTransition) buyGas() error {
-	if !st.evm.ChainConfig().IsSwimmerPhase0(st.evm.Context.Time) {
-		mgval := new(big.Int).SetUint64(st.msg.Gas())
-		mgval = mgval.Mul(mgval, st.gasPrice)
-		balanceCheck := mgval
-		if st.gasFeeCap != nil {
-			balanceCheck = new(big.Int).SetUint64(st.msg.Gas())
-			balanceCheck.Mul(balanceCheck, st.gasFeeCap)
-			balanceCheck.Add(balanceCheck, st.value)
-		}
-		if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
-			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
-		}
-		if err := st.gp.SubGas(st.msg.Gas()); err != nil {
-			return err
-		}
-		st.gas += st.msg.Gas()
-		st.initialGas = st.msg.Gas()
-		st.state.SubBalance(st.msg.From(), mgval)
-		return nil
-	} else {
-		// Only check transactions that are not fake
-		if !st.msg.IsFake() {
-			preContract := &predeploy.PredeployContract{}
-			fixedGasPrice := preContract.GetGasPrice(st.state)
-
-			feeCheck := new(big.Int).SetUint64(st.msg.Gas())
-			feeCheck = feeCheck.Mul(feeCheck, fixedGasPrice)
-			balanceCheck := feeCheck
-
-			contractCreation := st.msg.To() == nil
-			if !contractCreation && st.msg.GasPrice().Cmp(new(big.Int).SetUint64(0)) == 0 {
-				to := *st.msg.To()
-				isWhitelistedUser := preContract.IsWhitelistedUser(st.state, to, st.msg.From())
-				isWhitelistedFunc := preContract.IsWhitelistedFunc(st.state, to, st.msg.Data()[:4])
-				if !isWhitelistedUser || !isWhitelistedFunc {
-					return fmt.Errorf("%w: from address %s have gas fee cap (0); to address %s don't accept pay fee", ErrUnderpriced, st.msg.From().Hex(), to.Hex())
-				}
-				if have, want := st.state.GetBalance(to), feeCheck; have.Cmp(want) < 0 {
-					return fmt.Errorf("%w: to address %v have %v want %v", ErrInsufficientFunds, to, have, want)
-				}
-				if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
-					return fmt.Errorf("%w: from address %v have %v want %v", ErrInsufficientFunds,
-						st.msg.From(), have, want)
-				}
-				st.state.SubBalance(to, feeCheck)
-			} else {
-				if st.msg.GasPrice().Cmp(fixedGasPrice) != 0 {
-					return fmt.Errorf("%w: from address %s have (%d) diffrent from fixed fee (%d)", ErrUnderpriced,
-						st.msg.From().Hex(), fixedGasPrice, st.gasPrice)
-				}
-
-				// if st.gasFeeCap != nil {
-				// 	balanceCheck = new(big.Int).SetUint64(st.msg.Gas())
-				// 	balanceCheck.Mul(balanceCheck, st.gasFeeCap)
-				// 	balanceCheck.Add(balanceCheck, st.value)
-				// }
-
-				if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
-					return fmt.Errorf("%w: from address %v have %v want %v", ErrInsufficientFunds,
-						st.msg.From(), have, want)
-				}
-				st.state.SubBalance(st.msg.From(), feeCheck)
-			}
-		}
-
-		if err := st.gp.SubGas(st.msg.Gas()); err != nil {
-			return err
-		}
-		st.gas += st.msg.Gas()
-		st.initialGas = st.msg.Gas()
-		return nil
+	mgval := new(big.Int).SetUint64(st.msg.Gas())
+	mgval = mgval.Mul(mgval, st.gasPrice)
+	balanceCheck := mgval
+	if st.gasFeeCap != nil {
+		balanceCheck = new(big.Int).SetUint64(st.msg.Gas())
+		balanceCheck.Mul(balanceCheck, st.gasFeeCap)
+		balanceCheck.Add(balanceCheck, st.value)
 	}
+	if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
+		return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
+	}
+	if err := st.gp.SubGas(st.msg.Gas()); err != nil {
+		return err
+	}
+	st.gas += st.msg.Gas()
+
+	st.initialGas = st.msg.Gas()
+	st.state.SubBalance(st.msg.From(), mgval)
+	return nil
 }
 
 func (st *StateTransition) preCheck() error {
@@ -301,11 +247,18 @@ func (st *StateTransition) preCheck() error {
 		if vm.IsProhibited(st.msg.From()) {
 			return fmt.Errorf("%w: address %v", vmerrs.ErrAddrProhibited, st.msg.From())
 		}
-	}
 
+		// Check that the sender is on the tx allow list if enabled
+		isTxAllowList := st.evm.ChainConfig().IsTxAllowList(st.evm.Context.Time)
+		if isTxAllowList {
+			txAllowListRole := precompile.GetTxAllowListStatus(st.state, st.msg.From())
+			if !txAllowListRole.IsEnabled() {
+				return fmt.Errorf("%w: %s", precompile.ErrSenderAddressNotAllowListed, st.msg.From())
+			}
+		}
+	}
 	// Make sure that transaction gasFeeCap is greater than the baseFee (post london)
-	// <<Swimmer VM>> Disable EIP-1559
-	if !st.evm.ChainConfig().IsSwimmerPhase0(st.evm.Context.Time) && st.evm.ChainConfig().IsSubnetEVM(st.evm.Context.Time) {
+	if st.evm.ChainConfig().IsSubnetEVM(st.evm.Context.Time) {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		if !st.evm.Config.NoBaseFee || st.gasFeeCap.BitLen() > 0 || st.gasTipCap.BitLen() > 0 {
 			if l := st.gasFeeCap.BitLen(); l > 256 {
@@ -326,14 +279,6 @@ func (st *StateTransition) preCheck() error {
 				return fmt.Errorf("%w: address %v, maxFeePerGas: %s baseFee: %s", ErrFeeCapTooLow,
 					st.msg.From().Hex(), st.gasFeeCap, st.evm.Context.BaseFee)
 			}
-		}
-	}
-
-	if st.evm.ChainConfig().IsSwimmerPhase0(st.evm.Context.Time) {
-		preContract := &predeploy.PredeployContract{}
-		// Verify blocked account
-		if blockedTime := preContract.GetBlockedTimeOf(st.state, st.msg.From()); blockedTime > uint64(time.Now().Unix()) {
-			return fmt.Errorf("%w: address %s blocked until %s", ErrAccountBlocked, st.msg.From().Hex(), time.Unix(int64(blockedTime), 0))
 		}
 	}
 	return st.buyGas()
@@ -359,11 +304,12 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	// 1. the nonce of the message caller is correct
 	// 2. caller has enough balance to cover transaction fee(gaslimit * gasprice)
 	// 3. the amount of gas required is available in the block
-	// 4. the purchased gas is enough to cover intrinsic usage
-	// 5. there is no overflow when calculating intrinsic gas
-	// 6. caller has enough balance to cover asset transfer for **topmost** call
+	// 4. the message caller is on the tx allow list (if enabled)
+	// 5. the purchased gas is enough to cover intrinsic usage
+	// 6. there is no overflow when calculating intrinsic gas
+	// 7. caller has enough balance to cover asset transfer for **topmost** call
 
-	// Check clauses 1-3, buy gas if everything is correct
+	// Check clauses 1-4, buy gas if everything is correct
 	if err := st.preCheck(); err != nil {
 		return nil, err
 	}
@@ -372,8 +318,6 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	homestead := st.evm.ChainConfig().IsHomestead(st.evm.Context.BlockNumber)
 	istanbul := st.evm.ChainConfig().IsIstanbul(st.evm.Context.BlockNumber)
 	subnetEVM := st.evm.ChainConfig().IsSubnetEVM(st.evm.Context.Time)
-	isSwimmerPhase0 := st.evm.ChainConfig().IsSwimmerPhase0(st.evm.Context.Time)
-	preContract := &predeploy.PredeployContract{}
 
 	contractCreation := msg.To() == nil
 
@@ -407,13 +351,8 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
 		ret, st.gas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gas, st.value)
 	}
-	st.refundGas(subnetEVM, isSwimmerPhase0)
-
-	if isSwimmerPhase0 {
-		st.state.AddBalance(preContract.GetRewardPoolAddress(st.state), new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.gasPrice))
-	} else {
-		st.state.AddBalance(st.evm.Context.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.gasPrice))
-	}
+	st.refundGas(subnetEVM)
+	st.state.AddBalance(st.evm.Context.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.gasPrice))
 
 	return &ExecutionResult{
 		UsedGas:    st.gasUsed(),
@@ -422,7 +361,7 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	}, nil
 }
 
-func (st *StateTransition) refundGas(subnetEVM bool, isSwimmerPhase0 bool) {
+func (st *StateTransition) refundGas(subnetEVM bool) {
 	// Inspired by: https://gist.github.com/holiman/460f952716a74eeb9ab358bb1836d821#gistcomment-3642048
 	if !subnetEVM {
 		// Apply refund counter, capped to half of the used gas.
@@ -434,12 +373,7 @@ func (st *StateTransition) refundGas(subnetEVM bool, isSwimmerPhase0 bool) {
 	}
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := new(big.Int).Mul(new(big.Int).SetUint64(st.gas), st.gasPrice)
-
-	if isSwimmerPhase0 && st.msg.To() != nil && st.msg.GasPrice().Cmp(new(big.Int).SetUint64(0)) == 0 {
-		st.state.AddBalance(*st.msg.To(), remaining)
-	} else {
-		st.state.AddBalance(st.msg.From(), remaining)
-	}
+	st.state.AddBalance(st.msg.From(), remaining)
 
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.

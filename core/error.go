@@ -101,8 +101,4 @@ var (
 
 	// ErrSenderNoEOA is returned if the sender of a transaction is a contract.
 	ErrSenderNoEOA = errors.New("sender not an eoa")
-
-	ErrToInsufficientFunds = errors.New("to address insufficient funds for gas * price")
-
-	ErrAccountBlocked = errors.New("sender was blocked")
 )

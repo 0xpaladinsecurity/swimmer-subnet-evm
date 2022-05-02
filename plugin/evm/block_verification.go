@@ -16,10 +16,9 @@ import (
 )
 
 var (
-	legacyBlockValidator        = blockValidatorLegacy{}
-	legacyMinGasPrice           = big.NewInt(params.MinGasPrice)
-	subnetEVMBlockValidator     = blockValidatorSubnetEVM{}
-	swimmerPhase0BlockValidator = blockValidatorSwimmerPhase0{}
+	legacyBlockValidator    = blockValidatorLegacy{}
+	legacyMinGasPrice       = big.NewInt(params.MinGasPrice)
+	subnetEVMBlockValidator = blockValidatorSubnetEVM{}
 )
 
 type BlockValidator interface {
@@ -209,102 +208,5 @@ func (blockValidatorSubnetEVM) SyntacticVerify(b *Block) error {
 	case !ethHeader.BlockGasCost.IsUint64():
 		return fmt.Errorf("too large blockGasCost: %d", ethHeader.BlockGasCost)
 	}
-	return nil
-}
-
-type blockValidatorSwimmerPhase0 struct{}
-
-func (blockValidatorSwimmerPhase0) SyntacticVerify(b *Block) error {
-	if b == nil || b.ethBlock == nil {
-		return errInvalidBlock
-	}
-
-	// Skip verification of the genesis block since it
-	// should already be marked as accepted
-	if b.ethBlock.Hash() == b.vm.genesisHash {
-		return nil
-	}
-
-	// Perform block and header sanity checks
-	ethHeader := b.ethBlock.Header()
-	if ethHeader.Number == nil || !ethHeader.Number.IsUint64() {
-		return errInvalidBlock
-	}
-	if ethHeader.Difficulty == nil || !ethHeader.Difficulty.IsUint64() ||
-		ethHeader.Difficulty.Uint64() != 1 {
-		return fmt.Errorf(
-			"expected difficulty to be 1 but got %v: %w",
-			ethHeader.Difficulty, errInvalidDifficulty,
-		)
-	}
-	if ethHeader.Nonce.Uint64() != 0 {
-		return fmt.Errorf(
-			"expected nonce to be 0 but got %d: %w",
-			ethHeader.Nonce.Uint64(), errInvalidNonce,
-		)
-	}
-
-	// Remove verify block limit (stateful) in syntacticVerify
-	// blockState, err := b.vm.chain.BlockState(b.ethBlock)
-	// if err != nil {
-	// 	return fmt.Errorf(
-	// 		"can not read current block state: %w", err,
-	// 	)
-	// }
-	// preContract := &predeploy.PredeployContract{}
-	// expectedGas := preContract.GetGasLimit(blockState)
-	// if ethHeader.GasLimit != expectedGas.Uint64() {
-	// 	return fmt.Errorf(
-	// 		"expected gas limit to be %d in Swimmer VM but got %d",
-	// 		expectedGas, ethHeader.GasLimit,
-	// 	)
-	// }
-
-	if ethHeader.MixDigest != (common.Hash{}) {
-		return fmt.Errorf(
-			"expected MixDigest to be empty but got %x: %w",
-			ethHeader.MixDigest, errInvalidMixDigest,
-		)
-	}
-
-	expectedExtraDataSize := params.ExtraDataSize
-	if headerExtraDataSize := len(ethHeader.Extra); headerExtraDataSize != expectedExtraDataSize {
-		return fmt.Errorf(
-			"expected header ExtraData to be %d but got %d: %w",
-			expectedExtraDataSize, headerExtraDataSize, errHeaderExtraDataTooBig,
-		)
-	}
-
-	// Check that the tx hash in the header matches the body
-	txsHash := types.DeriveSha(b.ethBlock.Transactions(), new(trie.Trie))
-	if txsHash != ethHeader.TxHash {
-		return errTxHashMismatch
-	}
-	// Check that the uncle hash in the header matches the body
-	uncleHash := types.CalcUncleHash(b.ethBlock.Uncles())
-	if uncleHash != ethHeader.UncleHash {
-		return errUncleHashMismatch
-	}
-	// Coinbase must be zero, if AllowFeeRecipients is not enabled
-	// if !b.vm.chainConfig.AllowFeeRecipients && b.ethBlock.Coinbase() != constants.BlackholeAddr {
-	// 	return errInvalidBlock
-	// }
-
-	// Block must not have any uncles
-	if len(b.ethBlock.Uncles()) > 0 {
-		return errUnclesUnsupported
-	}
-	// Block must not be empty
-	txs := b.ethBlock.Transactions()
-	if len(txs) == 0 {
-		return errEmptyBlock
-	}
-
-	// Make sure the block isn't too far in the future
-	blockTimestamp := b.ethBlock.Time()
-	if maxBlockTime := uint64(b.vm.clock.Time().Add(maxFutureBlockTime).Unix()); blockTimestamp > maxBlockTime {
-		return fmt.Errorf("block timestamp is too far in the future: %d > allowed %d", blockTimestamp, maxBlockTime)
-	}
-
 	return nil
 }
